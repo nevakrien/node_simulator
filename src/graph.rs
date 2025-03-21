@@ -156,6 +156,7 @@ impl Graph {
         
         
         // Remove and return the edge
+        self.remove_node(edge_id);
         self.edges.remove(edge_id)
     }
     
