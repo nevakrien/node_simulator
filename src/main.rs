@@ -1,25 +1,50 @@
 mod graph;
 
-use crate::egui::Vec2;
 use eframe::{egui, App, Frame};
-use egui::{Color32, Pos2, Rect, Sense, Stroke, StrokeKind};
+use egui::{Color32, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2, Key};
 use graph::{Graph, ID, NodeData};
-use slotmap::{Key, SecondaryMap};
+use slotmap::{Key as SlotKey, SecondaryMap};
 use std::collections::{HashSet, VecDeque};
+
+use rfd::FileDialog;
+use std::fs::File;
+use std::io::{Read, Write};
+
+// A wrapper to serialize egui::Pos2.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SerializablePos2 {
+    x: f32,
+    y: f32,
+}
+
+impl From<egui::Pos2> for SerializablePos2 {
+    fn from(pos: egui::Pos2) -> Self {
+        Self { x: pos.x, y: pos.y }
+    }
+}
+
+impl From<SerializablePos2> for egui::Pos2 {
+    fn from(s: SerializablePos2) -> Self {
+        egui::pos2(s.x, s.y)
+    }
+}
+
+// SaveData stores the graph and positions (not GUI state).
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SaveData {
+    graph: Graph,
+    // Convert SecondaryMap<ID, Pos2> into a Vec of (ID, SerializablePos2) pairs.
+    positions: Vec<(ID, SerializablePos2)>,
+}
 
 struct GraphEditor {
     graph: Graph,
-    /// Stores on-screen positions for both nodes and edge-nodes.
     positions: SecondaryMap<ID, Pos2>,
-    /// Currently selected element (if any). This can be a node or an edge-node.
     selected: Option<ID>,
-    /// If set, holds the source node for creating an edge.
     edge_mode: Option<ID>,
-
-    /// If we're dragging a node, store its ID here.
-    dragging: Option<ID>,
-    /// The accumulated pointer delta or offset used for dragging.
-    drag_offset: Option<egui::Vec2>,
+    // dragging is now a bool, always applying to the selected node.
+    dragging: bool,
+    drag_offset: Option<Vec2>,
 }
 
 impl Default for GraphEditor {
@@ -29,24 +54,20 @@ impl Default for GraphEditor {
             positions: SecondaryMap::new(),
             selected: None,
             edge_mode: None,
-            dragging: None,
+            dragging: false,
             drag_offset: None,
         }
     }
 }
 
 impl GraphEditor {
-    /// Clean up the positions cache by removing IDs that no longer exist in the graph.
     fn cleanup_positions(&mut self) {
-        self.positions
-            .retain(|id, _| self.graph.get_node(id).is_some() || self.graph.get_edge(id).is_some());
+        self.positions.retain(|id, _| {
+            self.graph.get_node(id).is_some() || self.graph.get_edge(id).is_some()
+        });
     }
 
-    /// Recursively update the positions of edge-nodes connected (directly or indirectly) to `start_id`.
-    ///
-    /// We do a BFS/DFS from `start_id`, traversing edges in both directions. Whenever we encounter an edge node,
-    /// we recompute its midpoint from its source & target. Then we continue outward from that edge to any edges
-    /// that connect to it, etc. This ensures that all nested/cascading edge connections remain accurate.
+    // Recursively update midpoints for edge-nodes connected to `start_id`.
     fn update_positions_recursive(&mut self, start_id: ID) {
         let mut visited = HashSet::new();
         let mut queue = VecDeque::new();
@@ -54,22 +75,17 @@ impl GraphEditor {
 
         while let Some(curr) = queue.pop_front() {
             if !visited.insert(curr) {
-                continue; // already visited
+                continue;
             }
-
-            // If curr is an edge-node, recompute its midpoint based on source and target
             if let Some(edge) = self.graph.get_edge(curr) {
-                // If either endpoint was removed or doesn't have a position, skip
-                if let (Some(&src_pos), Some(&tgt_pos)) = (
+                if let (Some(&src), Some(&tgt)) = (
                     self.positions.get(edge.source),
                     self.positions.get(edge.target),
                 ) {
-                    let midpoint = ((src_pos.to_vec2() + tgt_pos.to_vec2()) * 0.5).to_pos2();
-                    self.positions.insert(curr, midpoint);
+                    let mid = ((src.to_vec2() + tgt.to_vec2()) * 0.5).to_pos2();
+                    self.positions.insert(curr, mid);
                 }
             }
-
-            // Enqueue neighbors (outgoing & incoming edges)
             let outgoing = self.graph.get_outgoing_edges(curr);
             let incoming = self.graph.get_incoming_edges(curr);
             for neighbor in outgoing.into_iter().chain(incoming) {
@@ -77,63 +93,146 @@ impl GraphEditor {
             }
         }
     }
+
+    // Save the graph and positions using a native file dialog.
+    fn save_graph(&self) -> std::io::Result<()> {
+        if let Some(path) = FileDialog::new()
+            .set_title("Save Graph")
+            .set_file_name("graph_save.bin")
+            .save_file()
+        {
+            let positions: Vec<(ID, SerializablePos2)> = self
+                .positions
+                .iter()
+                .map(|(id, pos)| (id, pos.clone().into()))
+                .collect();
+            let save_data = SaveData {
+                graph: self.graph.clone(),
+                positions,
+            };
+            let encoded = bincode::serialize(&save_data)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            let mut file = File::create(path)?;
+            file.write_all(&encoded)?;
+        }
+        Ok(())
+    }
+
+    // Load the graph and positions using a native file dialog.
+    fn load_graph(&mut self) -> std::io::Result<()> {
+        if let Some(path) = FileDialog::new().set_title("Load Graph").pick_file() {
+            let mut file = File::open(path)?;
+            let mut buffer = Vec::new();
+            file.read_to_end(&mut buffer)?;
+            let save_data: SaveData = bincode::deserialize(&buffer)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            self.graph = save_data.graph;
+            let mut new_positions: SecondaryMap<ID, Pos2> = SecondaryMap::new();
+            for (id, spos) in save_data.positions {
+                new_positions.insert(id, spos.into());
+            }
+            self.positions = new_positions;
+            self.selected = None;
+            self.edge_mode = None;
+            self.dragging = false;
+            self.drag_offset = None;
+        }
+        Ok(())
+    }
+
+    // Clear the current graph state (new blank slate).
+    fn new_graph(&mut self) {
+        self.graph = Graph::new();
+        self.positions.clear();
+        self.selected = None;
+        self.edge_mode = None;
+        self.dragging = false;
+        self.drag_offset = None;
+    }
 }
 
 impl App for GraphEditor {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
+        // Keyboard shortcuts for saving, loading, and new state.
+        if ctx.input(|i| i.key_pressed(Key::S) && i.modifiers.ctrl) {
+            if let Err(e) = self.save_graph() {
+                eprintln!("Error saving graph: {e}");
+            }
+        }
+        if ctx.input(|i| i.key_pressed(Key::O) && i.modifiers.ctrl) {
+            if let Err(e) = self.load_graph() {
+                eprintln!("Error loading graph: {e}");
+            }
+        }
+        if ctx.input(|i| i.key_pressed(Key::N) && i.modifiers.ctrl) {
+            self.new_graph();
+        }
+
+        // Top panel with Save and Load buttons.
+        egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                if ui.button("💾 Save").clicked() {
+                    if let Err(e) = self.save_graph() {
+                        eprintln!("Error saving graph: {e}");
+                    }
+                }
+                if ui.button("📂 Load").clicked() {
+                    if let Err(e) = self.load_graph() {
+                        eprintln!("Error loading graph: {e}");
+                    }
+                }
+                if ui.button("✚ New").clicked() {
+                    self.new_graph();
+                }
+            });
+        });
+
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.label("Left-click on empty space: create a node");
-            ui.label("Shift + Left-click on a node: create an edge (click two nodes)");
-            ui.label("Right-click on a node/edge: delete it");
-            ui.label("Left-click and drag a real node: move it (edges update automatically)");
+            ui.label("Left-click empty space: add node");
+            ui.label("Shift + click two nodes: connect with edge");
+            ui.label("Right-click: delete node/edge");
+            ui.label("Drag node: move with edge updates (cannot leave visible area)");
+            ui.label("Ctrl+S: save, Ctrl+O: load, Ctrl+N: new");
 
-            // Allocate a painter for drawing.
-            let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::drag());
+            let (response, painter) =
+                ui.allocate_painter(ui.available_size(), Sense::drag());
+            let to_screen = |pos: Pos2| response.rect.left_top() + pos.to_vec2();
 
-            // Helper: convert a local position to screen coordinates.
-            let to_screen = |pos: Pos2| -> Pos2 {
-                response.rect.left_top() + pos.to_vec2()
-            };
-
-            // -----------------------------------------------------------
-            // 1) DRAG LOGIC: if we're currently dragging, update position
-            // -----------------------------------------------------------
-            if let Some(dragging_id) = self.dragging {
-                // If user let go of the primary button, stop dragging
+            // DRAG LOGIC: if dragging, update the position of the selected node.
+            if self.dragging {
                 if !ctx.input(|i| i.pointer.button_down(egui::PointerButton::Primary)) {
-                    self.dragging = None;
+                    self.dragging = false;
                     self.drag_offset = None;
-                    // After finishing the drag, recursively update edges
-                    self.update_positions_recursive(dragging_id);
-                } else {
-                    // Keep dragging
-                    let pointer_delta = ctx.input(|i| i.pointer.delta());
-                    if pointer_delta != Vec2::new(0.0,0.0) {
-                        if let Some(old_pos) = self.positions.get(dragging_id) {
-                            let new_pos = *old_pos + pointer_delta;
-                            self.positions.insert(dragging_id, new_pos);
+                    if let Some(id) = self.selected {
+                        self.update_positions_recursive(id);
+                    }
+                } else if let Some(id) = self.selected {
+                    if let Some(old_pos) = self.positions.get(id) {
+                        let delta = ctx.input(|i| i.pointer.delta());
+                        if delta != Vec2::ZERO {
+                            let mut new_pos = *old_pos + delta;
+                            // Clamp new_pos so the node (20x20) remains within response.rect.
+                            let half_size = 10.0;
+                            new_pos.x = new_pos.x.clamp(half_size, response.rect.width() - half_size);
+                            new_pos.y = new_pos.y.clamp(half_size, response.rect.height() - half_size);
+                            self.positions.insert(id, new_pos);
                         }
                     }
                 }
             }
 
-            // -----------------------------------------------------------
-            // 2) Handle pointer input for click, new drag, edge creation, deletion, etc.
-            // -----------------------------------------------------------
+            // Handle pointer input for clicks, edge creation, deletion, etc.
             if ctx.input(|i| i.pointer.any_pressed()) {
                 if let Some(click_pos) = ctx.input(|i| i.pointer.hover_pos()) {
                     let local_pos = (click_pos - response.rect.left_top()).to_pos2();
-
-                    // Check if click is near an existing element.
+                    // Find an element under the pointer.
                     let clicked_id = self
                         .positions
                         .iter()
                         .find(|(_, &pos)| pos.distance(local_pos) < 20.0)
                         .map(|(id, _)| id);
-
-                    // If we found an existing item under the pointer:
                     if let Some(id) = clicked_id {
-                        // 2a) Right-click => Delete
+                        // Right-click: delete the element.
                         if ctx.input(|i| i.pointer.button_pressed(egui::PointerButton::Secondary)) {
                             if self.graph.get_node(id).is_some() {
                                 self.graph.remove_node(id);
@@ -142,55 +241,43 @@ impl App for GraphEditor {
                             }
                             self.positions.remove(id);
                         }
-                        // 2b) Shift+Left-click => Create Edge
+                        // Shift+Left-click: create an edge.
                         else if ctx.input(|i| {
                             i.modifiers.shift
                                 && i.pointer.button_pressed(egui::PointerButton::Primary)
                         }) {
                             if let Some(source) = self.edge_mode.take() {
                                 if let Some(edge_id) = self.graph.add_edge(source, id) {
-                                    // Compute the midpoint for the new edge-node.
-                                    let midpoint = ((self.positions[source].to_vec2()
+                                    let mid = ((self.positions[source].to_vec2()
                                         + self.positions[id].to_vec2())
                                         * 0.5)
                                         .to_pos2();
-                                    self.positions.insert(edge_id, midpoint);
+                                    self.positions.insert(edge_id, mid);
                                 }
                             } else {
-                                // Start edge creation mode.
                                 self.edge_mode = Some(id);
                             }
                         }
-                        // 2c) Normal left-click => either select or start dragging
-                        else if ctx.input(|i| {
-                            i.pointer.button_pressed(egui::PointerButton::Primary)
-                        }) {
+                        // Left-click: select and, if it's a real node, start dragging.
+                        else if ctx.input(|i| i.pointer.button_pressed(egui::PointerButton::Primary))
+                        {
                             self.selected = Some(id);
-                            // Attempt to drag if this is a "real" node (not an edge node).
                             if self.graph.get_edge(id).is_none() {
-                                // Start dragging
-                                self.dragging = Some(id);
-                                // We could store an offset if we want more precise
-                                // "grab from center" dragging, but it's optional.
+                                self.dragging = true;
                                 self.drag_offset = None;
                             }
                         }
-                    } else {
-                        // 2d) Click on empty space => Add a new node
-                        if ctx.input(|i| {
-                            i.pointer.button_pressed(egui::PointerButton::Primary)
-                                && !i.modifiers.shift
-                        }) {
-                            let new_id = self.graph.add_node(NodeData::default());
-                            self.positions.insert(new_id, local_pos);
-                        }
+                    } else if ctx.input(|i| {
+                        i.pointer.button_pressed(egui::PointerButton::Primary)
+                            && !i.modifiers.shift
+                    }) {
+                        let new_id = self.graph.add_node(NodeData::default());
+                        self.positions.insert(new_id, local_pos);
                     }
                 }
             }
 
-            // -----------------------------------------------------------
-            // 3) Draw edges
-            // -----------------------------------------------------------
+            // Draw edges.
             for edge in self.graph.edges_iter() {
                 if let (Some(src), Some(tgt), Some(mid)) = (
                     self.positions.get(edge.source),
@@ -208,15 +295,13 @@ impl App for GraphEditor {
                 }
             }
 
-            // -----------------------------------------------------------
-            // 4) Draw nodes (and edge-nodes)
-            // -----------------------------------------------------------
+            // Draw nodes and edge-nodes.
             for (id, pos) in &self.positions {
                 let is_edge = self.graph.get_edge(id).is_some();
                 let color = if !is_edge {
                     Color32::LIGHT_GREEN
                 } else {
-                    Color32::LIGHT_BLUE // edge node
+                    Color32::LIGHT_BLUE
                 };
                 let rect = Rect::from_center_size(to_screen(*pos), egui::vec2(20.0, 20.0));
                 painter.rect(
@@ -226,7 +311,6 @@ impl App for GraphEditor {
                     Stroke::new(1.0, Color32::BLACK),
                     StrokeKind::Middle,
                 );
-                // (Optional) Debug: label with ID
                 painter.text(
                     rect.center(),
                     egui::Align2::CENTER_CENTER,
@@ -236,15 +320,12 @@ impl App for GraphEditor {
                 );
             }
 
-            // -----------------------------------------------------------
-            // 5) Visual feedback for edge creation
-            // -----------------------------------------------------------
-            if let Some(edge_src) = self.edge_mode {
-                if let Some(pos) = self.positions.get(edge_src) {
-                    let highlight_rect =
-                        Rect::from_center_size(to_screen(*pos), egui::vec2(26.0, 26.0));
+            // Highlight node in edge creation mode.
+            if let Some(src) = self.edge_mode {
+                if let Some(pos) = self.positions.get(src) {
+                    let highlight = Rect::from_center_size(to_screen(*pos), egui::vec2(26.0, 26.0));
                     painter.rect(
-                        highlight_rect,
+                        highlight,
                         8.0,
                         Color32::TRANSPARENT,
                         Stroke::new(2.0, Color32::RED),
@@ -253,9 +334,6 @@ impl App for GraphEditor {
                 }
             }
 
-            // -----------------------------------------------------------
-            // 6) Cleanup the cached positions
-            // -----------------------------------------------------------
             self.cleanup_positions();
         });
     }

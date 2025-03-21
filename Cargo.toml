@@ -24,6 +24,7 @@ eframe = { version = "0.31.1" , default-features = false, features = [
     "x11"             # Assuming you're on Linux with X11
     # Excluded: accesskit, wayland, web_screen_reader, and other extras
 ]}
+rfd = "0.15.3"
 
 #general use
 #eframe = { version = "0.31.1"}
