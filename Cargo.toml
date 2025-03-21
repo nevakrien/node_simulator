@@ -1,0 +1,29 @@
+[package]
+name = "node_simulator"
+version = "0.1.0"
+edition = "2021"
+
+#this cargo is made for faster compiles on my specific machine.
+#for a general use versopm simply get regular eframe
+
+[profile.dev]
+opt-level = 0
+debug = false
+incremental = true
+codegen-units = 256
+
+[dependencies]
+serde = { version = "1.0.219", features = ["derive"] }
+slotmap = { version = "1.0.7", features = ["serde"] }
+serde_json = "1.0"
+bincode = "1.3.3"
+
+eframe = { version = "0.31.1" , default-features = false, features = [
+    "default_fonts",  # Keep fonts
+    "glow",           # OpenGL renderer
+    "x11"             # Assuming you're on Linux with X11
+    # Excluded: accesskit, wayland, web_screen_reader, and other extras
+]}
+
+#general use
+#eframe = { version = "0.31.1"}
