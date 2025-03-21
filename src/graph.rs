@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use slotmap::{new_key_type, DenseSlotMap,SecondaryMap};
+use slotmap::{new_key_type, DenseSlotMap,SecondaryMap,SparseSecondaryMap};
 use std::collections::{HashMap, HashSet};
 
 new_key_type! {
@@ -7,7 +7,9 @@ new_key_type! {
 }
 
 #[derive(Default,Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct NodeData{}
+pub struct NodeData{
+	//some sort of visual indicator should go here
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Node {
@@ -17,9 +19,9 @@ pub struct Node {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Edge {
-    id: ID,           // Graph element ID (can be connected to like a node)
-    source: ID,
-    target: ID,
+    pub id: ID,           // Graph element ID (can be connected to like a node)
+    pub source: ID,
+    pub target: ID,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -28,10 +30,10 @@ pub struct Graph {
     edges: SecondaryMap<ID, Edge>,
     
     // Maps node/edge ID to its outgoing edges
-    source_to_edges: SecondaryMap<ID, HashSet<ID>>,
+    source_to_edges: SparseSecondaryMap<ID, HashSet<ID>>,
     
     // Maps node/edge ID to its incoming edges
-    target_to_edges: SecondaryMap<ID, HashSet<ID>>,
+    target_to_edges: SparseSecondaryMap<ID, HashSet<ID>>,
     
 }
 
@@ -117,6 +119,10 @@ impl Graph {
     }
     
     pub fn remove_edge(&mut self, edge_id: ID) -> Option<Edge> {
+        //first simple cleanup before we ruin the meta data
+        self.remove_node(edge_id);
+
+
         // Get the edge
         let edge = self.edges.get(edge_id)?;
         let graph_id = edge.id;
@@ -156,7 +162,6 @@ impl Graph {
         
         
         // Remove and return the edge
-        self.remove_node(edge_id);
         self.edges.remove(edge_id)
     }
     
