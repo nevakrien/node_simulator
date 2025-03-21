@@ -28,10 +28,10 @@ pub struct Graph {
     edges: SecondaryMap<ID, Edge>,
     
     // Maps node/edge ID to its outgoing edges
-    source_to_edges: HashMap<ID, HashSet<ID>>,
+    source_to_edges: SecondaryMap<ID, HashSet<ID>>,
     
     // Maps node/edge ID to its incoming edges
-    target_to_edges: HashMap<ID, HashSet<ID>>,
+    target_to_edges: SecondaryMap<ID, HashSet<ID>>,
     
 }
 
@@ -54,12 +54,12 @@ impl Graph {
         let mut edges_to_remove = Vec::new();
         
         // Add outgoing edges
-        if let Some(outgoing) = self.source_to_edges.get(&id) {
+        if let Some(outgoing) = self.source_to_edges.get(id) {
             edges_to_remove.extend(outgoing.iter().copied());
         }
         
         // Add incoming edges
-        if let Some(incoming) = self.target_to_edges.get(&id) {
+        if let Some(incoming) = self.target_to_edges.get(id) {
             edges_to_remove.extend(incoming.iter().copied());
         }
         
@@ -69,8 +69,8 @@ impl Graph {
         }
         
         // Remove the node from the lookup maps
-        self.source_to_edges.remove(&id);
-        self.target_to_edges.remove(&id);
+        self.source_to_edges.remove(id);
+        self.target_to_edges.remove(id);
         
         // Remove the node
         self.nodes.remove(id)
@@ -103,13 +103,13 @@ impl Graph {
         
         // Update source_to_edges map
         self.source_to_edges
-            .entry(source)
+            .entry(source).unwrap()
             .or_insert_with(HashSet::new)
             .insert(id);
         
         // Update target_to_edges map
         self.target_to_edges
-            .entry(target)
+            .entry(target).unwrap()
             .or_insert_with(HashSet::new)
             .insert(id);
         
@@ -125,7 +125,7 @@ impl Graph {
         
         // Collect all child edges that need to be removed
         let mut child_edges = Vec::new();
-        if let Some(outgoing) = self.source_to_edges.get(&graph_id) {
+        if let Some(outgoing) = self.source_to_edges.get(graph_id) {
             for &child_edge_id in outgoing {
                 if let Some(edge) = self.edges.get(child_edge_id) {
                     child_edges.push(edge.id);
@@ -139,18 +139,18 @@ impl Graph {
         }
         
         // Remove the edge from source_to_edges
-        if let Some(edges) = self.source_to_edges.get_mut(&source) {
+        if let Some(edges) = self.source_to_edges.get_mut(source) {
             edges.remove(&edge_id);
             if edges.is_empty() {
-                self.source_to_edges.remove(&source);
+                self.source_to_edges.remove(source);
             }
         }
         
         // Remove the edge from target_to_edges
-        if let Some(edges) = self.target_to_edges.get_mut(&target) {
+        if let Some(edges) = self.target_to_edges.get_mut(target) {
             edges.remove(&edge_id);
             if edges.is_empty() {
-                self.target_to_edges.remove(&target);
+                self.target_to_edges.remove(target);
             }
         }
         
@@ -169,7 +169,7 @@ impl Graph {
     }
     
     pub fn get_outgoing_edges(&self, id: ID) -> Vec<ID> {
-        match self.source_to_edges.get(&id) {
+        match self.source_to_edges.get(id) {
             Some(edge_ids) => {
                 edge_ids.iter()
                     .filter_map(|&edge_id| {
@@ -182,7 +182,7 @@ impl Graph {
     }
     
     pub fn get_incoming_edges(&self, id: ID) -> Vec<ID> {
-        match self.target_to_edges.get(&id) {
+        match self.target_to_edges.get(id) {
             Some(edge_ids) => {
                 edge_ids.iter()
                     .filter_map(|&edge_id| {
