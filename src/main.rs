@@ -1,15 +1,15 @@
 mod graph;
 
+use slotmap::SecondaryMap;
 use eframe::{egui, App, Frame};
 use egui::{Color32, Pos2, Rect, Sense, Stroke, StrokeKind};
 use graph::{Graph, ID, NodeData};
 use slotmap::Key;
-use std::collections::HashMap;
 
 struct GraphEditor {
     graph: Graph,
     /// Stores on-screen positions for both nodes and edge-nodes.
-    positions: HashMap<ID, Pos2>,
+    positions: SecondaryMap<ID, Pos2>,
     /// Currently selected node (if any).
     selected: Option<ID>,
     /// If set, holds the source node for creating an edge.
@@ -20,7 +20,7 @@ impl Default for GraphEditor {
     fn default() -> Self {
         Self {
             graph: Graph::new(),
-            positions: HashMap::new(),
+            positions: SecondaryMap::new(),
             selected: None,
             edge_mode: None,
         }
@@ -30,7 +30,7 @@ impl Default for GraphEditor {
 impl GraphEditor {
     /// Clean up the positions cache by removing IDs that are no longer in the graph.
     fn cleanup_positions(&mut self) {
-        self.positions.retain(|&id, _| {
+        self.positions.retain(|id, _| {
             self.graph.get_node(id).is_some() || self.graph.get_edge(id).is_some()
         });
     }
@@ -59,7 +59,7 @@ impl App for GraphEditor {
                     // Check if click is near an existing element.
                     let clicked_id = self.positions.iter().find(|(_, &pos)| {
                         pos.distance(local_pos) < 20.0
-                    }).map(|(&id, _)| id);
+                    }).map(|(id, _)| id);
                     
                     if let Some(id) = clicked_id {
                         // Right-click: delete the element.
@@ -69,7 +69,7 @@ impl App for GraphEditor {
                             } else if self.graph.get_edge(id).is_some() {
                                 self.graph.remove_edge(id);
                             }
-                            self.positions.remove(&id);
+                            self.positions.remove(id);
                         }
                         // Shift+Left-click: create an edge.
                         else if ctx.input(|i| {
@@ -79,8 +79,8 @@ impl App for GraphEditor {
                             if let Some(source) = self.edge_mode.take() {
                                 if let Some(edge_id) = self.graph.add_edge(source, id) {
                                     // Compute the midpoint for the edge-node.
-                                    let midpoint = ((self.positions[&source].to_vec2() +
-                                        self.positions[&id].to_vec2()) * 0.5)
+                                    let midpoint = ((self.positions[source].to_vec2() +
+                                        self.positions[id].to_vec2()) * 0.5)
                                         .to_pos2();
                                     self.positions.insert(edge_id, midpoint);
                                 }
@@ -110,9 +110,9 @@ impl App for GraphEditor {
             // --- Draw edges ---
             for edge in self.graph.edges_iter() {
                 if let (Some(src), Some(tgt), Some(mid)) = (
-                    self.positions.get(&edge.source),
-                    self.positions.get(&edge.target),
-                    self.positions.get(&edge.id),
+                    self.positions.get(edge.source),
+                    self.positions.get(edge.target),
+                    self.positions.get(edge.id),
                 ) {
                     painter.line_segment(
                         [to_screen(*src), to_screen(*mid)],
@@ -127,7 +127,7 @@ impl App for GraphEditor {
 
             // --- Draw nodes and edge-nodes ---
             for (id, pos) in &self.positions {
-                let is_node = self.graph.get_node(*id).is_some();
+                let is_node = self.graph.get_node(id).is_some();
                 let color = if is_node {
                     Color32::LIGHT_GREEN
                 } else {
@@ -153,7 +153,7 @@ impl App for GraphEditor {
 
             // --- Visual feedback for edge creation ---
             if let Some(edge_src) = self.edge_mode {
-                if let Some(pos) = self.positions.get(&edge_src) {
+                if let Some(pos) = self.positions.get(edge_src) {
                     let highlight_rect = Rect::from_center_size(to_screen(*pos), egui::vec2(26.0, 26.0));
                     painter.rect(
                         highlight_rect,
