@@ -79,6 +79,10 @@ impl Graph {
     }
     
     pub fn add_edge(&mut self, source: ID, target: ID) -> Option<ID> {
+        if source==target {
+        	return None;
+        }
+
         // Check if both endpoints exist (either as nodes or as edges)
         let source_exists = self.nodes.contains_key(source);
         let target_exists = self.nodes.contains_key(target);
@@ -86,6 +90,7 @@ impl Graph {
         if !source_exists || !target_exists {
             return None;
         }
+
         
         // Create a temporary ID for the graph element
         let id = self.nodes.insert_with_key(|k| Node { 
