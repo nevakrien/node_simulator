@@ -16,6 +16,7 @@ pub struct GraphEditor {
     dragging: bool,
     panning: bool,
     show_help: bool,
+
 }
 
 impl Default for GraphEditor {
@@ -27,6 +28,7 @@ impl Default for GraphEditor {
             dragging: false,
             panning: false,
             show_help: true,
+
         }
     }
 }
@@ -122,112 +124,123 @@ impl GraphEditor {
     //  2) Single Function for Reading ALL Raw Input
     // ─────────────────────────────────────────────────────────────
     #[allow(clippy::needless_return)]
-    fn process_input(&mut self, ctx: &egui::Context, response: &egui::Response, screen_origin: Pos2) {
-        let input = ctx.input(|i| i.clone());
+fn process_global_input(
+    &mut self,
+    ctx: &egui::Context,
+    response: &egui::Response,
+    screen_origin: Pos2,
+) {
+    let input = ctx.input(|i| i.clone());
 
-        // ── 2.1 KEYBOARD ──────────────────────────────
-        // Each check returns immediately after performing the action,
-        // ensuring only one action happens per frame.
-        if input.key_pressed(Key::S) && input.modifiers.ctrl {
-            let _ = self.save_graph();
-            return;
-        } else if input.key_pressed(Key::O) && input.modifiers.ctrl {
-            let _ = self.load_graph();
-            return;
-        } else if input.key_pressed(Key::N) && input.modifiers.ctrl {
-            self.new_graph();
-            return;
-        } else if input.key_pressed(Key::Home) {
-            self.reset_camera();
+    // ── KEYBOARD SHORTCUTS ────────────────────────────────────
+    if input.key_pressed(Key::S) && input.modifiers.ctrl {
+        let _ = self.save_graph();
+        return;
+    } else if input.key_pressed(Key::O) && input.modifiers.ctrl {
+        let _ = self.load_graph();
+        return;
+    } else if input.key_pressed(Key::N) && input.modifiers.ctrl {
+        self.new_graph();
+        return;
+    } else if input.key_pressed(Key::Home) {
+        self.reset_camera();
+        return;
+    }
+
+    // If the mouse is not inside the main drawing area, skip
+    if !response.hovered() {
+        return;
+    }
+
+    // ── ZOOM (mouse wheel) ─────────────────────────────────────
+    let scroll_delta = input.raw_scroll_delta.y;
+    if scroll_delta.abs() > 0.0 {
+        if let Some(cursor_pos) = input.pointer.hover_pos() {
+            self.zoom_camera(cursor_pos, screen_origin, scroll_delta);
+        }
+        // don't return; we can zoom + do other stuff in the same frame
+    }
+
+    // ── PAN (middle mouse or Alt+Left) ─────────────────────────
+    let middle_down = input.pointer.button_down(PointerButton::Middle);
+    let alt_left_down = input.modifiers.alt && input.pointer.button_down(PointerButton::Primary);
+    if middle_down || alt_left_down {
+        self.panning = true;
+        let delta = input.pointer.delta();
+        if delta != Vec2::ZERO {
+            self.pan_camera(delta);
+        }
+        return;
+    } else {
+        self.panning = false;
+    }
+
+    // ── DRAGGING (already selected node) ───────────────────────
+    if self.dragging && !self.panning {
+        // If the button was released, stop dragging
+        if !input.pointer.button_down(PointerButton::Primary) {
+            self.dragging = false;
             return;
         }
-
-        // If the mouse is not inside the main drawing area, skip
-        if !response.hovered() {
-            return;
+        // Otherwise move the node with the pointer
+        if let Some(id) = self.selected {
+            if let Some(pointer_pos) = input.pointer.hover_pos() {
+                let new_world_pos = self.to_world(pointer_pos, screen_origin);
+                self.move_node(id, new_world_pos);
+            }
         }
+        return;
+    }
 
-        // ── 2.2 ZOOM (mouse wheel) ────────────────────
-        let scroll_delta = input.raw_scroll_delta.y;
-        if scroll_delta.abs() > 0.0 {
+    // ── LEFT-CLICK EMPTY SPACE => CREATE NODE ──────────────────
+    // If you want “click empty space => create new node,” we do it here:
+    if input.pointer.button_pressed(PointerButton::Primary)
+        && !input.modifiers.alt
+        && !input.modifiers.shift
+    {
+        // We only create a node if the user didn't click a node (that logic is handled elsewhere)
+        // So we check if the pointer is in "empty space" (no node responded):
+        // Easiest check is: does egui want pointer input? If so, some other widget used it
+        // If not, we create a node here
+        if !ctx.is_pointer_over_area() {
             if let Some(cursor_pos) = input.pointer.hover_pos() {
-                self.zoom_camera(cursor_pos, screen_origin, scroll_delta);
-            }
-            //zoom can happen while we do other stuff
-            // return;
-        }
-
-        // ── 2.3 PAN (middle mouse or Alt+Left) ─────────
-        let middle_down = input.pointer.button_down(PointerButton::Middle);
-        let alt_left_down = input.modifiers.alt && input.pointer.button_down(PointerButton::Primary);
-        if middle_down || alt_left_down {
-            // Panning
-            self.panning = true;
-            let delta = input.pointer.delta();
-            if delta != Vec2::ZERO {
-                self.pan_camera(delta);
-            }
-            return;
-        } else {
-            self.panning = false;
-        }
-
-        // ── 2.4 DRAGGING (already selected node) ───────
-        if self.dragging && !self.panning {
-            // If the button was released, stop dragging
-            if !input.pointer.button_down(PointerButton::Primary) {
-                self.dragging = false;
+                let world_pos = self.to_world(cursor_pos, screen_origin);
+                self.create_node(world_pos);
                 return;
             }
-            // Otherwise move the node with the pointer
-            if let Some(id) = self.selected {
-                if let Some(pointer_pos) = input.pointer.hover_pos() {
-                    let new_world_pos = self.to_world(pointer_pos, screen_origin);
-                    self.move_node(id, new_world_pos);
-                }
-            }
-            return;
         }
-
-        // ── 2.5 NEW CLICK (if we aren't dragging/panning) ─────
-        if input.pointer.any_pressed() {
-            if let Some(click_pos) = input.pointer.hover_pos() {
-                let world_pos = self.to_world(click_pos, screen_origin);
-                let hit_radius = 20.0 / self.state.camera.zoom;
-                let clicked_id = self.state.find_element_at(world_pos, hit_radius);
-
-                // Right-click => delete
-                if input.pointer.button_pressed(PointerButton::Secondary) {
-                    if let Some(id) = clicked_id {
-                        self.delete_element(id);
-                    }
-                    return;
-                }
-
-                // Shift+Left => edge creation
-                if input.modifiers.shift && input.pointer.button_pressed(PointerButton::Primary) {
-                    if let Some(id) = clicked_id {
-                        self.handle_edge_creation(id);
-                    }
-                    return;
-                }
-
-                // Left => select or create
-                if input.pointer.button_pressed(PointerButton::Primary) && !input.modifiers.alt {
-                    if let Some(id) = clicked_id {
-                        self.select_element(id);
-                    } else {
-                        self.create_node(world_pos);
-                    }
-                }
-
-                return
-            }
-        }
-
-        // If none of the above conditions triggered, do nothing.
-        return
     }
+}
+
+fn process_node_input(&mut self, node_id: ID, response: &egui::Response, screen_origin: Pos2) {
+    let input = response.ctx.input(|i| i.clone());
+
+    // ── Right-click → delete ───────────────────────
+    if response.clicked_by(PointerButton::Secondary) {
+        self.delete_element(node_id);
+        return;
+    }
+
+    // ── Shift + left-click → edge creation ─────────
+    if response.clicked_by(PointerButton::Primary) && input.modifiers.shift {
+        self.handle_edge_creation(node_id);
+        return;
+    }
+
+    // ── Regular left-click → select ────────────────
+    if response.clicked_by(PointerButton::Primary) && !input.modifiers.shift {
+        self.select_element(node_id); // still needed for drag tracking
+    }
+
+    // ── Drag movement for selected node ────────────
+    if response.dragged(){
+        if let Some(pointer_pos) = input.pointer.hover_pos() {
+            let new_world_pos = self.to_world(pointer_pos, screen_origin);
+            self.move_node(node_id, new_world_pos);
+        }
+    }
+}
+
 
     // ─────────────────────────────────────────────────────────────
     //  3) UI & Drawing
@@ -299,27 +312,40 @@ impl GraphEditor {
         });
     }
 
-    fn draw_graph(&self, painter: &egui::Painter, screen_origin: Pos2, ctx: &egui::Context) {
-        // Draw edges
-        for edge in self.state.graph.edges_iter() {
-            if let (Some(src), Some(tgt), Some(mid)) = (
-                self.state.positions.get(edge.source),
-                self.state.positions.get(edge.target),
-                self.state.positions.get(edge.id),
-            ) {
-                painter.line_segment(
-                    [self.to_screen(*src, screen_origin), self.to_screen(*mid, screen_origin)],
-                    Stroke::new(1.5, Color32::LIGHT_BLUE),
-                );
-                painter.line_segment(
-                    [self.to_screen(*mid, screen_origin), self.to_screen(*tgt, screen_origin)],
-                    Stroke::new(1.5, Color32::LIGHT_BLUE),
-                );
-            }
+fn draw_graph(
+    &mut self,
+    painter: &egui::Painter,
+    screen_origin: Pos2,
+    ctx: &egui::Context,
+    ui: &mut egui::Ui
+) {
+    // Draw edges
+    for edge in self.state.graph.edges_iter() {
+        if let (Some(src), Some(tgt), Some(mid)) = (
+            self.state.positions.get(edge.source),
+            self.state.positions.get(edge.target),
+            self.state.positions.get(edge.id),
+        ) {
+            painter.line_segment(
+                [
+                    self.to_screen(*src, screen_origin),
+                    self.to_screen(*mid, screen_origin),
+                ],
+                Stroke::new(1.5, Color32::LIGHT_BLUE),
+            );
+            painter.line_segment(
+                [
+                    self.to_screen(*mid, screen_origin),
+                    self.to_screen(*tgt, screen_origin),
+                ],
+                Stroke::new(1.5, Color32::LIGHT_BLUE),
+            );
         }
+    }
 
-        // Draw nodes
-        for (id, pos) in &self.state.positions {
+    // Allocate a UI layer exactly over the painter area
+    ui.allocate_ui_at_rect(painter.clip_rect(), |ui| {
+        for (id, pos) in self.state.positions.clone() {
             let is_edge = self.state.graph.get_edge(id).is_some();
             let color = if is_edge {
                 Color32::LIGHT_BLUE
@@ -327,11 +353,23 @@ impl GraphEditor {
                 Color32::LIGHT_GREEN
             };
 
+            // Where to draw the node in screen space
             let node_size = egui::vec2(20.0, 20.0) * self.state.camera.zoom;
-            let rect = Rect::from_center_size(self.to_screen(*pos, screen_origin), node_size);
+            let screen_pos = self.to_screen(pos, screen_origin);
+            let rect = Rect::from_center_size(screen_pos, node_size);
             let corner_radius = 5.0 * self.state.camera.zoom;
 
+            // Draw the node
             painter.rect(rect, corner_radius, color, Stroke::new(1.0, Color32::BLACK), StrokeKind::Middle);
+
+            // Interactable region:
+            let response = ui.interact(rect, ui.id().with(id), Sense::all());
+            // Hand off the logic to our new function
+            self.process_node_input(id, &response,screen_origin);
+
+            // If you want more debug prints:
+            // if response.hovered()  { println!("Node {id:?} hovered"); }
+            // etc.
 
             // Show ID if zoomed in enough
             if self.state.camera.zoom > 0.4 {
@@ -349,22 +387,24 @@ impl GraphEditor {
                 );
             }
         }
+    });
 
-        // Highlight any node in edge-creation mode
-        if let Some(src) = self.edge_mode {
-            if let Some(pos) = self.state.positions.get(src) {
-                let highlight_size = egui::vec2(26.0, 26.0) * self.state.camera.zoom;
-                let highlight = Rect::from_center_size(self.to_screen(*pos, screen_origin), highlight_size);
-                painter.rect(
-                    highlight,
-                    8.0 * self.state.camera.zoom,
-                    Color32::TRANSPARENT,
-                    Stroke::new(2.0, Color32::RED),
-                    StrokeKind::Middle,
-                );
-            }
+    // Highlight any node in edge-creation mode
+    if let Some(src) = self.edge_mode {
+        if let Some(pos) = self.state.positions.get(src) {
+            let highlight_size = egui::vec2(26.0, 26.0) * self.state.camera.zoom;
+            let highlight_rect =
+                Rect::from_center_size(self.to_screen(*pos, screen_origin), highlight_size);
+            painter.rect(
+                highlight_rect,
+                8.0 * self.state.camera.zoom,
+                Color32::TRANSPARENT,
+                Stroke::new(2.0, Color32::RED),
+                StrokeKind::Middle,
+            );
         }
     }
+}
 
     // ─────────────────────────────────────────────────────────────
     //  4) Coordinate Helpers
@@ -392,11 +432,11 @@ impl App for GraphEditor {
             let screen_origin = response.rect.left_top();
 
             // All input is handled in one place:
-            self.process_input(ctx, &response, screen_origin);
+            self.process_global_input(ctx, &response, screen_origin);
 
             // Cleanup orphaned positions, then draw
             self.state.cleanup_positions();
-            self.draw_graph(&painter, screen_origin, ctx);
+            self.draw_graph(&painter, screen_origin, ctx,ui);
         });
 
         self.draw_help_overlay(ctx);
