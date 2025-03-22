@@ -121,7 +121,7 @@ impl GraphEditor {
     // ─────────────────────────────────────────────────────────────
     //  2) Single Function for Reading ALL Raw Input
     // ─────────────────────────────────────────────────────────────
-
+    #[allow(clippy::needless_return)]
     fn process_input(&mut self, ctx: &egui::Context, response: &egui::Response, screen_origin: Pos2) {
         let input = ctx.input(|i| i.clone());
 
@@ -220,10 +220,13 @@ impl GraphEditor {
                         self.create_node(world_pos);
                     }
                 }
+
+                return
             }
         }
 
         // If none of the above conditions triggered, do nothing.
+        return
     }
 
     // ─────────────────────────────────────────────────────────────

@@ -131,14 +131,19 @@ impl GraphState {
         })
     }
     
-    // Find an element under the given position
+    // Find the closest element to the given position
     pub fn find_element_at(&self, position: Pos2, hit_radius: f32) -> Option<ID> {
         self.positions
             .iter()
-            .find(|(_, &pos)| pos.distance(position) < hit_radius)
+            .filter(|(_, &pos)| pos.distance(position) < hit_radius)
+            .min_by(|(_, &pos_a), (_, &pos_b)| {
+                let dist_a = pos_a.distance(position);
+                let dist_b = pos_b.distance(position);
+                dist_a.partial_cmp(&dist_b).unwrap_or(std::cmp::Ordering::Equal)
+            })
             .map(|(id, _)| id)
     }
-    
+        
     // Save the graph state to a file
     pub fn save_to_file(&self, path: &Path) -> std::io::Result<()> {
         let encoded = bincode::serialize(self)
