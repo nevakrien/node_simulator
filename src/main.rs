@@ -337,7 +337,7 @@ impl App for GraphEditor {
             }
             
             // Define helper function to convert between world and screen coords
-            let to_screen = |pos: Pos2| self.camera.world_to_screen(pos, screen_origin);
+            // let to_screen = |pos: Pos2| self.camera.world_to_screen(pos, screen_origin);
             let to_world = |pos: Pos2| self.camera.screen_to_world(pos, screen_origin);
 
             // DRAG LOGIC: if dragging, update the position of the selected node.

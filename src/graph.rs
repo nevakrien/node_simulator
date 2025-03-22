@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use slotmap::{new_key_type, DenseSlotMap,SecondaryMap,SparseSecondaryMap};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashSet};
 
 new_key_type! {
     pub struct ID;
@@ -106,13 +106,13 @@ impl Graph {
         // Update source_to_edges map
         self.source_to_edges
             .entry(source).unwrap()
-            .or_insert_with(HashSet::new)
+            .or_default()
             .insert(id);
         
         // Update target_to_edges map
         self.target_to_edges
             .entry(target).unwrap()
-            .or_insert_with(HashSet::new)
+            .or_default()
             .insert(id);
         
         Some(id)
@@ -208,15 +208,15 @@ impl Graph {
     }
     
     
-    // Serialization to binary (using bincode)
-    pub fn to_binary(&self) -> Result<Vec<u8>, bincode::Error> {
-        bincode::serialize(self)
-    }
+    // // Serialization to binary (using bincode)
+    // pub fn to_binary(&self) -> Result<Vec<u8>, bincode::Error> {
+    //     bincode::serialize(self)
+    // }
     
-    // Deserialization from binary
-    pub fn from_binary(data: &[u8]) -> Result<Self, bincode::Error> {
-        bincode::deserialize(data)
-    }
+    // // Deserialization from binary
+    // pub fn from_binary(data: &[u8]) -> Result<Self, bincode::Error> {
+    //     bincode::deserialize(data)
+    // }
 }
 
 #[cfg(test)]
@@ -404,8 +404,8 @@ mod tests {
         graph.add_edge(node1, node2);
         
         // Test binary serialization
-        let binary = graph.to_binary().unwrap();
-        let deserialized = Graph::from_binary(&binary).unwrap();
+        let binary = bincode::serialize(&graph).unwrap();
+        let deserialized : Graph= bincode::deserialize(&binary).unwrap();
         
         assert!(deserialized.get_node(node1).is_some());
         assert!(deserialized.get_node(node2).is_some());
