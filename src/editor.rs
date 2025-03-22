@@ -14,6 +14,7 @@ pub struct GraphEditor {
     selected: Option<ID>,
     // edge_mode: Option<ID>,
     show_help: bool,
+    highlight: bool,
 }
 
 impl Default for GraphEditor {
@@ -23,6 +24,7 @@ impl Default for GraphEditor {
             selected: None,
             // edge_mode: None,
             show_help: true,
+            highlight:true,
         }
     }
 }
@@ -110,6 +112,11 @@ impl GraphEditor {
     fn reset_camera(&mut self) {
         self.state.camera.reset();
     }
+
+    fn toggle_highlight(&mut self) {
+        self.highlight = !self.highlight;
+    }
+
 
     // ─────────────────────────────────────────────────────────────
     //  2) Input Handling (drag, shift-click, etc.)
@@ -260,6 +267,11 @@ impl GraphEditor {
                 if ui.button("🏠 Reset Camera").clicked() {
                     self.reset_camera();
                 }
+
+                if ui.button("🎯 Toggle Highlight").clicked() {
+                    self.toggle_highlight();
+                }
+
                 ui.label(format!("Zoom: {:.1}x", self.state.camera.zoom));
 
                 // Right-justified help toggle
@@ -307,32 +319,35 @@ impl GraphEditor {
         });
     }
 
-fn draw_edge_segment(
-    &mut self,
-    edge_id: ID,
-    screen_start: Pos2,
-    screen_end: Pos2,
-    ui: &mut egui::Ui,
-    extra: &'static str
-) {
-    // Create a hitbox for the line segment (expand a bit for easier clicking).
-    let hitbox = Rect::from_two_pos(screen_start, screen_end).expand(6.0);
-    // Use the same approach as nodes: just create an interactive region.
-    let response = ui.interact(hitbox, ui.id().with(edge_id).with("edge").with(extra), Sense::click());
-    self.process_edge_segment_input(edge_id, &response);
+    fn draw_edge_segment(
+        &mut self,
+        edge_id: ID,
+        screen_start: Pos2,
+        screen_end: Pos2,
+        ui: &mut egui::Ui,
+        extra: &'static str
+    ) {
+        // Create a hitbox for the line segment (expand a bit for easier clicking).
+        let hitbox = Rect::from_two_pos(screen_start, screen_end).expand(6.0);
+        // Use the same approach as nodes: just create an interactive region.
+        let response = ui.interact(hitbox, ui.id().with(edge_id).with("edge").with(extra), Sense::click());
+        self.process_edge_segment_input(edge_id, &response);
 
-    // Draw the edge line—change stroke if hovered.
-    let stroke = if response.hovered() {
-        Stroke::new(2.0, Color32::YELLOW)
-    } else {
-        Stroke::new(1.5, Color32::LIGHT_BLUE)
-    };
-    ui.painter().line_segment([screen_start, screen_end], stroke);
-}
+        // Draw the edge line—change stroke if hovered.
+        let stroke = if self.highlight &&  response.hovered() {
+            Stroke::new(2.0, Color32::YELLOW)
+        } else {
+            Stroke::new(1.5, Color32::LIGHT_BLUE)
+        };
+        ui.painter().line_segment([screen_start, screen_end], stroke);
+    }
 
 
 
-    fn draw_graph(
+// Suppose you added this field in your GraphEditor:
+// pub highlight: bool,
+
+fn draw_graph(
     &mut self,
     painter: &egui::Painter,
     screen_origin: Pos2,
@@ -341,7 +356,7 @@ fn draw_edge_segment(
 ) {
     // Allocate one UI element for the entire drawing area
     ui.allocate_ui_at_rect(painter.clip_rect(), |ui| {
-        // Collect edges to avoid borrowing issues
+        // 1) Draw edges
         let edges: Vec<_> = self.state.graph.edges_iter().cloned().collect();
         for edge in edges {
             if let (Some(src), Some(tgt), Some(mid)) = (
@@ -353,42 +368,48 @@ fn draw_edge_segment(
                 let screen_mid = self.to_screen(*mid, screen_origin);
                 let screen_tgt = self.to_screen(*tgt, screen_origin);
 
-                // Draw each segment of the edge with interactive hitboxes.
-                for (start, end , extra) in [(screen_src, screen_mid , "src"), (screen_mid, screen_tgt , "tgt")] {
-                    self.draw_edge_segment(edge.id, start, end, ui,extra);
+                // Draw each segment of the edge with interactive hitboxes
+                for (start, end, seg_label) in [
+                    (screen_src, screen_mid, "src"),
+                    (screen_mid, screen_tgt, "tgt"),
+                ] {
+                    self.draw_edge_segment(edge.id, start, end, ui, seg_label);
                 }
             }
         }
 
-        // Now draw all nodes (including edge nodes) in the same UI.
+        // 2) Draw all nodes (including edge nodes)
         for (id, pos) in self.state.positions.clone() {
             let is_edge = self.state.graph.get_edge(id).is_some();
-            let color = if is_edge {
+            let base_color = if is_edge {
                 Color32::LIGHT_BLUE
             } else {
                 Color32::LIGHT_GREEN
             };
 
-            // Compute node position and size in screen space.
             let node_size = egui::vec2(20.0, 20.0) * self.state.camera.zoom;
             let screen_pos = self.to_screen(pos, screen_origin);
             let rect = Rect::from_center_size(screen_pos, node_size);
             let corner_radius = 5.0 * self.state.camera.zoom;
 
-            // Draw the node rectangle.
-            ui.painter().rect(
-                rect,
-                corner_radius,
-                color,
-                Stroke::new(1.0, Color32::BLACK),
-                StrokeKind::Middle,
-            );
+            // Interactable region
+            let response = ui.interact(rect, ui.id().with("node").with(id), Sense::all());
 
-            // Create an interactive region over the node.
-            let response = ui.interact(rect, ui.id().with(id), Sense::all());
+            // Only turn fill yellow if self.highlight is true AND hovered
+            let fill_color = if self.highlight && response.hovered() {
+                Color32::YELLOW
+            } else {
+                base_color
+            };
+
+            // Always use a consistent black border
+            let stroke = Stroke::new(1.0, Color32::BLACK);
+            ui.painter().rect(rect, corner_radius, fill_color, stroke, StrokeKind::Middle);
+
+            // Process node input (drag, delete, etc.)
             self.process_node_input(id, &response, screen_origin);
 
-            // Show the node ID if zoomed in enough.
+            // Optionally show text if zoomed in enough
             if self.state.camera.zoom > 0.4 {
                 let text_style = if self.state.camera.zoom < 0.7 {
                     egui::TextStyle::Small
@@ -405,12 +426,17 @@ fn draw_edge_segment(
             }
         }
 
-        // Finally, if there's a selected node, draw its highlight.
-        if let Some(src) = self.selected {
-            if let Some(pos) = self.state.positions.get(src) {
-                let highlight_size = egui::vec2(26.0, 26.0) * self.state.camera.zoom;
-                let highlight_rect =
-                    Rect::from_center_size(self.to_screen(*pos, screen_origin), highlight_size);
+        // 3) Draw a red highlight for the selected node, only if self.highlight is true
+        if let Some(selected_id) = self.selected {
+            if let Some(pos) = self.state.positions.get(selected_id) {
+                // Make the highlight rectangle just slightly bigger than the node
+                let node_size = 20.0 * self.state.camera.zoom;
+                let highlight_size = node_size + 6.0 * self.state.camera.zoom;
+                let highlight_rect = Rect::from_center_size(
+                    self.to_screen(*pos, screen_origin),
+                    egui::vec2(highlight_size, highlight_size),
+                );
+
                 ui.painter().rect(
                     highlight_rect,
                     8.0 * self.state.camera.zoom,
@@ -422,6 +448,7 @@ fn draw_edge_segment(
         }
     });
 }
+
 
     fn to_screen(&self, pos: Pos2, screen_origin: Pos2) -> Pos2 {
         self.state.camera.world_to_screen(pos, screen_origin)
