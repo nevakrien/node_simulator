@@ -94,7 +94,6 @@ struct GraphEditor {
     edge_mode: Option<ID>,
     // dragging is now a bool, always applying to the selected node.
     dragging: bool,
-    drag_offset: Option<Vec2>,
     // Camera for pan and zoom
     camera: Camera,
     // Track if we're currently panning the camera
@@ -111,7 +110,6 @@ impl Default for GraphEditor {
             selected: None,
             edge_mode: None,
             dragging: false,
-            drag_offset: None,
             camera: Camera::default(),
             panning: false,
             show_help: true, // Help is visible by default
@@ -208,7 +206,6 @@ impl GraphEditor {
             self.selected = None;
             self.edge_mode = None;
             self.dragging = false;
-            self.drag_offset = None;
             self.panning = false;
         }
         Ok(())
@@ -221,7 +218,6 @@ impl GraphEditor {
         self.selected = None;
         self.edge_mode = None;
         self.dragging = false;
-        self.drag_offset = None;
         // Reset camera to default
         self.camera = Camera::default();
         self.panning = false;
@@ -342,22 +338,21 @@ impl App for GraphEditor {
 
             // DRAG LOGIC: if dragging, update the position of the selected node.
             if self.dragging && !self.panning {
+
                 if !ctx.input(|i| i.pointer.button_down(egui::PointerButton::Primary)) {
                     self.dragging = false;
-                    self.drag_offset = None;
-                    if let Some(id) = self.selected {
-                        self.update_positions_recursive(id);
-                    }
                 } else if let Some(id) = self.selected {
-                    if let Some(_old_pos) = self.positions.get(id) {
-                        if let Some(pointer_pos) = ctx.input(|i| i.pointer.hover_pos()) {
-                            // Convert pointer position to world space
-                            let new_world_pos = to_world(pointer_pos);
-                            
-                            // No need to clamp in world space as we have camera panning
-                            self.positions.insert(id, new_world_pos);
-                        }
+                    if let Some(pointer_pos) = ctx.input(|i| i.pointer.hover_pos()) {
+                        // Convert pointer position to world space
+                        let new_world_pos = to_world(pointer_pos);
+                        
+                        // No need to clamp in world space as we have camera panning
+                        self.positions.insert(id, new_world_pos);
                     }
+                }
+
+                if let Some(id) = self.selected {
+                    self.update_positions_recursive(id);
                 }
             }
 
@@ -416,7 +411,6 @@ impl App for GraphEditor {
                             self.selected = Some(id);
                             if self.graph.get_edge(id).is_none() {
                                 self.dragging = true;
-                                self.drag_offset = None;
                             }
                         }
                     } else if ctx.input(|i| {
@@ -481,7 +475,7 @@ impl App for GraphEditor {
                     painter.text(
                         rect.center(),
                         egui::Align2::CENTER_CENTER,
-                        format!("{:?}", id.data().as_ffi()),
+                        format!("{:?}", id.data().as_ffi() as u32),
                         text_style.resolve(&ctx.style()),
                         Color32::BLACK,
                     );
