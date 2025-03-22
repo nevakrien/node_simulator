@@ -99,6 +99,8 @@ struct GraphEditor {
     camera: Camera,
     // Track if we're currently panning the camera
     panning: bool,
+    // Toggle to show/hide help text
+    show_help: bool,
 }
 
 impl Default for GraphEditor {
@@ -112,6 +114,7 @@ impl Default for GraphEditor {
             drag_offset: None,
             camera: Camera::default(),
             panning: false,
+            show_help: true, // Help is visible by default
         }
     }
 }
@@ -272,18 +275,18 @@ impl App for GraphEditor {
                 }
                 // Display current zoom level
                 ui.label(format!("Zoom: {:.1}x", self.camera.zoom));
+                
+                // Add spacer to push help button to the right
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let help_text = if self.show_help { "❓ Hide Help" } else { "❓ Show Help" };
+                    if ui.button(help_text).clicked() {
+                        self.show_help = !self.show_help;
+                    }
+                });
             });
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.label("Left-click empty space: add node");
-            ui.label("Shift + click two nodes: connect with edge");
-            ui.label("Right-click: delete node/edge");
-            ui.label("Drag node: move with edge updates");
-            ui.label("Middle-click drag or Alt+Left drag: pan view");
-            ui.label("Mouse wheel: zoom in/out");
-            ui.label("Home key or Reset Camera button: reset view");
-            ui.label("Ctrl+S: save, Ctrl+O: load, Ctrl+N: new");
 
             let (response, painter) =
                 ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
@@ -502,6 +505,36 @@ impl App for GraphEditor {
 
             self.cleanup_positions();
         });
+        
+        // Draw help text as an overlay if enabled
+        if self.show_help {
+            // Create a semi-transparent overlay in the top-left corner
+            let help_area = egui::Area::new("help_overlay".into())
+                .anchor(egui::Align2::LEFT_TOP, egui::vec2(10.0, 50.0))
+                .movable(false)
+                .interactable(false);
+                
+            help_area.show(ctx, |ui| {
+                ui.visuals_mut().widgets.noninteractive.bg_fill = Color32::from_rgba_premultiplied(0, 0, 0, 180);
+                egui::Frame::NONE
+                    .fill(Color32::from_rgba_premultiplied(0, 0, 0, 180))
+                    .corner_radius(5.0)
+                    .stroke(Stroke::new(1.0, Color32::from_gray(100)))
+                    .inner_margin(8.0)
+                    .show(ui, |ui| {
+                        ui.set_max_width(300.0);
+                        ui.label("Left-click empty space: add node");
+                        ui.label("Shift + click two nodes: connect with edge");
+                        ui.label("Right-click: delete node/edge");
+                        ui.label("Drag node: move with edge updates");
+                        ui.label("Middle-click drag or Alt+Left drag: pan view");
+                        ui.label("Mouse wheel: zoom in/out");
+                        ui.label("Home key or Reset Camera button: reset view");
+                        ui.label("Ctrl+S: save, Ctrl+O: load, Ctrl+N: new");
+                        ui.label("❓ button: toggle this help overlay");
+                    });
+            });
+        }
     }
 }
 
