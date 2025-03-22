@@ -1,3 +1,4 @@
+use egui::UiBuilder;
 use slotmap::Key as SlotKey;
 use eframe::{egui, App, Frame};
 use egui::{
@@ -343,10 +344,6 @@ impl GraphEditor {
     }
 
 
-
-// Suppose you added this field in your GraphEditor:
-// pub highlight: bool,
-
 fn draw_graph(
     &mut self,
     painter: &egui::Painter,
@@ -355,7 +352,7 @@ fn draw_graph(
     ui: &mut egui::Ui,
 ) {
     // Allocate one UI element for the entire drawing area
-    ui.allocate_ui_at_rect(painter.clip_rect(), |ui| {
+    ui.allocate_new_ui(UiBuilder::new().max_rect(painter.clip_rect()), |ui| {
         // 1) Draw edges
         let edges: Vec<_> = self.state.graph.edges_iter().cloned().collect();
         for edge in edges {
@@ -429,20 +426,14 @@ fn draw_graph(
         // 3) Draw a red highlight for the selected node, only if self.highlight is true
         if let Some(selected_id) = self.selected {
             if let Some(pos) = self.state.positions.get(selected_id) {
-                // Make the highlight rectangle just slightly bigger than the node
-                let node_size = 20.0 * self.state.camera.zoom;
-                let highlight_size = node_size + 6.0 * self.state.camera.zoom;
-                let highlight_rect = Rect::from_center_size(
-                    self.to_screen(*pos, screen_origin),
-                    egui::vec2(highlight_size, highlight_size),
-                );
+                let screen_pos = self.to_screen(*pos, screen_origin);
+                let node_radius = 10.0 * self.state.camera.zoom; // node is 20x20
+                let highlight_radius = node_radius + 7.0 * self.state.camera.zoom;
 
-                ui.painter().rect(
-                    highlight_rect,
-                    8.0 * self.state.camera.zoom,
-                    Color32::TRANSPARENT,
+                ui.painter().circle_stroke(
+                    screen_pos,
+                    highlight_radius,
                     Stroke::new(2.0, Color32::RED),
-                    StrokeKind::Middle,
                 );
             }
         }
