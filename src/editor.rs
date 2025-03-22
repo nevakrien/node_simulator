@@ -153,7 +153,8 @@ impl GraphEditor {
             if let Some(cursor_pos) = input.pointer.hover_pos() {
                 self.zoom_camera(cursor_pos, screen_origin, scroll_delta);
             }
-            return;
+            //zoom can happen while we do other stuff
+            // return;
         }
 
         // ── 2.3 PAN (middle mouse or Alt+Left) ─────────
@@ -218,7 +219,6 @@ impl GraphEditor {
                     } else {
                         self.create_node(world_pos);
                     }
-                    return;
                 }
             }
         }

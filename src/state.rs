@@ -119,7 +119,7 @@ impl GraphState {
     
     // Add an edge between two nodes
     pub fn add_edge_between(&mut self, source: ID, target: ID) -> Option<ID> {
-        self.graph.add_edge(source, target).map(|edge_id| {
+        self.graph.add_edge(source, target).inspect(|&edge_id| {
             // Calculate midpoint position for the edge
             if let (Some(&src_pos), Some(&tgt_pos)) = (
                 self.positions.get(source),
@@ -128,7 +128,6 @@ impl GraphState {
                 let mid = ((src_pos.to_vec2() + tgt_pos.to_vec2()) * 0.5).to_pos2();
                 self.positions.insert(edge_id, mid);
             }
-            edge_id
         })
     }
     
