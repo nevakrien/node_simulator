@@ -24,7 +24,7 @@ impl Default for GraphEditor {
             state: GraphState::default(),
             selected: None,
             // edge_mode: None,
-            show_help: true,
+            show_help: false,
             highlight:true,
         }
     }
@@ -320,28 +320,41 @@ impl GraphEditor {
         });
     }
 
-    fn draw_edge_segment(
-        &mut self,
-        edge_id: ID,
-        screen_start: Pos2,
-        screen_end: Pos2,
-        ui: &mut egui::Ui,
-        extra: &'static str
-    ) {
-        // Create a hitbox for the line segment (expand a bit for easier clicking).
-        let hitbox = Rect::from_two_pos(screen_start, screen_end).expand(6.0);
-        // Use the same approach as nodes: just create an interactive region.
-        let response = ui.interact(hitbox, ui.id().with(edge_id).with("edge").with(extra), Sense::click());
-        self.process_edge_segment_input(edge_id, &response);
+fn draw_edge_segment(
+    &mut self,
+    edge_id: ID,
+    start: Pos2,
+    end: Pos2,
+    ui: &mut egui::Ui,
+    extra: &'static str,
+) {
+    let thickness = 11.0 * self.state.camera.zoom;
+    let id = ui.id().with("edge").with(edge_id).with(extra);
+    let rect = Rect::from_two_pos(start, end).expand(thickness);
+    let response = ui.interact(rect, id, Sense::click());
 
-        // Draw the edge line—change stroke if hovered.
-        let stroke = if self.highlight &&  response.hovered() {
-            Stroke::new(2.0, Color32::YELLOW)
-        } else {
-            Stroke::new(1.5, Color32::LIGHT_BLUE)
-        };
-        ui.painter().line_segment([screen_start, screen_end], stroke);
+    let pointer = ui.input(|i| i.pointer.clone());
+    let mut hovered = false;
+
+    if let Some(pos) = pointer.hover_pos() {
+        if distance_to_segment(pos, start, end) <= thickness {
+            hovered = true;
+        }
     }
+
+    if hovered && pointer.any_click() {
+        self.process_edge_segment_input(edge_id, &response);
+        ui.memory_mut(|m| m.request_focus(id));
+    }
+
+    let stroke = if self.highlight && hovered {
+        Stroke::new(2.0, Color32::YELLOW)
+    } else {
+        Stroke::new(1.5, Color32::LIGHT_BLUE)
+    };
+
+    ui.painter().line_segment([start, end], stroke);
+}
 
 
 fn draw_graph(
@@ -426,14 +439,14 @@ fn draw_graph(
         // 3) Draw a red highlight for the selected node, only if self.highlight is true
         if let Some(selected_id) = self.selected {
             if let Some(pos) = self.state.positions.get(selected_id) {
-                let screen_pos = self.to_screen(*pos, screen_origin);
+                let screen_pos = self.to_screen(*pos, screen_origin) + self.state.camera.zoom*Vec2{x:0.3,y:0.1};
                 let node_radius = 10.0 * self.state.camera.zoom; // node is 20x20
-                let highlight_radius = node_radius + 7.0 * self.state.camera.zoom;
+                let highlight_radius = node_radius + 5.0 * self.state.camera.zoom;
 
                 ui.painter().circle_stroke(
                     screen_pos,
                     highlight_radius,
-                    Stroke::new(2.0, Color32::RED),
+                    Stroke::new(2.3, Color32::RED),
                 );
             }
         }
@@ -474,4 +487,12 @@ impl App for GraphEditor {
 
         self.draw_help_overlay(ctx);
     }
+}
+fn distance_to_segment(p: Pos2, a: Pos2, b: Pos2) -> f32 {
+    let ab = b - a;
+    let ap = p - a;
+    let t = ap.dot(ab) / ab.length_sq();
+    let t_clamped = t.clamp(0.0, 1.0);
+    let closest = a + t_clamped * ab;
+    p.distance(closest)
 }
