@@ -330,21 +330,21 @@ fn draw_edge_segment(
 ) {
     let thickness = 11.0 * self.state.camera.zoom;
     let id = ui.id().with("edge").with(edge_id).with(extra);
-    let rect = Rect::from_two_pos(start, end).expand(thickness);
-    let response = ui.interact(rect, id, Sense::click());
 
     let pointer = ui.input(|i| i.pointer.clone());
+    let pointer_pos = pointer.hover_pos();
+
     let mut hovered = false;
 
-    if let Some(pos) = pointer.hover_pos() {
+    if let Some(pos) = pointer_pos {
         if distance_to_segment(pos, start, end) <= thickness {
-            hovered = true;
-        }
-    }
+            // Only now do we register a UI element
+            let rect = Rect::from_two_pos(start, end).expand(thickness);
+            let response = ui.interact(rect, id, Sense::click());
 
-    if hovered && pointer.any_click() {
-        self.process_edge_segment_input(edge_id, &response);
-        ui.memory_mut(|m| m.request_focus(id));
+            hovered = true;
+            self.process_edge_segment_input(edge_id, &response);
+        }
     }
 
     let stroke = if self.highlight && hovered {
@@ -355,6 +355,7 @@ fn draw_edge_segment(
 
     ui.painter().line_segment([start, end], stroke);
 }
+
 
 
 fn draw_graph(
@@ -385,6 +386,8 @@ fn draw_graph(
                 ] {
                     self.draw_edge_segment(edge.id, start, end, ui, seg_label);
                 }
+
+                // self.draw_edge_segment(edge.id, screen_src, screen_tgt, ui, "line");
             }
         }
 
